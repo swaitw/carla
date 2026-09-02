@@ -72,7 +72,6 @@ set (
   carla-server
   libsqlite3
   Boost::asio
-  Boost::python
   Boost::geometry
   Boost::gil
   Eigen3::Eigen
@@ -80,6 +79,10 @@ set (
   png_static
   rpc
 )
+
+if (BUILD_PYTHON_API)
+  list (APPEND UE_DEPENDENCIES Boost::python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR})
+endif ()
 
 set (UE_DEPENDENCIES_ORDER_ONLY ${UE_DEPENDENCIES})
 
@@ -412,6 +415,12 @@ function (
   set (TARGET_NAME_SHORT package${TARGET_NAME_SUFFIX})
   set (TARGET_NAME carla-unreal-${TARGET_NAME_SHORT})
 
+  set (CARLA_PACKAGE_EXTRA_UAT_ARGS)
+  if (NOT "${CARLA_MAPS_TO_COOK}" STREQUAL "")
+    list (APPEND CARLA_PACKAGE_EXTRA_UAT_ARGS "-MapsToCook=${CARLA_MAPS_TO_COOK}")
+    carla_message ("package(${PACKAGE_CONFIGURATION}): cooking only ${CARLA_MAPS_TO_COOK}")
+  endif ()
+
   carla_add_custom_target (
     ${TARGET_NAME}
     "Create a CARLA package in ${PACKAGE_CONFIGURATION} mode."
@@ -441,13 +450,13 @@ function (
       -build
       -stagingdirectory=${CARLA_PACKAGE_STAGING_PATH}
       -archivedirectory=${CARLA_PACKAGE_ARCHIVE_PATH}
+      ${CARLA_PACKAGE_EXTRA_UAT_ARGS}
     USES_TERMINAL
     VERBATIM
   )
   
-  add_custom_command (
-    TARGET ${TARGET_NAME}
-    POST_BUILD
+  set (
+    PACKAGE_POST_BUILD_COMMANDS
     COMMAND ${CMAKE_COMMAND} -E echo "********** PACKAGE CREATING VERSION FILE UNREAL PACKAGE EXTRA FILES STARTED **********"
     COMMAND ${CMAKE_COMMAND}
       -DCARLA_WORKSPACE_PATH=${CARLA_WORKSPACE_PATH}
@@ -469,23 +478,38 @@ function (
       -DCARLA_PACKAGE_ARCHIVE_PATH=${CARLA_PACKAGE_ARCHIVE_PATH}
       -P${CMAKE_CURRENT_SOURCE_DIR}/Package/CopyCarlaAdditionalFiles.cmake
     COMMAND ${CMAKE_COMMAND} -E echo "********** PACKAGE COPYING CARLA ADDITIONAL FILES COMPLETED **********"
+  )
 
-    COMMAND ${CMAKE_COMMAND} -E echo "********** COMPRESSING PACKAGE STARTED **********"
-    COMMAND ${CMAKE_COMMAND}
-      -DCARLA_PACKAGE_PATH=${CARLA_PACKAGE_PATH}
-      -DCARLA_PACKAGE_ARCHIVE_PATH=${CARLA_PACKAGE_ARCHIVE_PATH}
-      -DCARLA_CURRENT_PACKAGE_PATH=${CARLA_CURRENT_PACKAGE_PATH}
-      -P${CMAKE_CURRENT_SOURCE_DIR}/Package/Compress.cmake
-    COMMAND ${CMAKE_COMMAND} -E echo "********** COMPRESSING PACKAGE COMPLETED **********"
+  if (NOT ${CARLA_UNREAL_PACKAGE_NO_COMPRESSION})
+    set (
+      PACKAGE_POST_BUILD_COMMANDS
+      ${PACKAGE_POST_BUILD_COMMANDS}
+      COMMAND ${CMAKE_COMMAND} -E echo "********** COMPRESSING PACKAGE STARTED **********"
+      COMMAND ${CMAKE_COMMAND}
+        -DCARLA_PACKAGE_PATH=${CARLA_PACKAGE_PATH}
+        -DCARLA_PACKAGE_ARCHIVE_PATH=${CARLA_PACKAGE_ARCHIVE_PATH}
+        -DCARLA_CURRENT_PACKAGE_PATH=${CARLA_CURRENT_PACKAGE_PATH}
+        -P${CMAKE_CURRENT_SOURCE_DIR}/Package/Compress.cmake
+      COMMAND ${CMAKE_COMMAND} -E echo "********** COMPRESSING PACKAGE COMPLETED **********"
+    )
+  endif ()
+
+  add_custom_command (
+    TARGET ${TARGET_NAME}
+    POST_BUILD
+    ${PACKAGE_POST_BUILD_COMMANDS}
     USES_TERMINAL
     VERBATIM
   )
 
   add_dependencies (
     ${TARGET_NAME}
-    carla-python-api
     carla-unreal-editor
   )
+
+  if (BUILD_PYTHON_API)
+    add_dependencies (${TARGET_NAME} carla-python-api)
+  endif ()
 
   carla_add_custom_target (
     ${TARGET_NAME_SHORT}

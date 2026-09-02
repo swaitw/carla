@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -7,6 +7,7 @@
 #pragma once
 
 #include "Carla/Sensor/PixelReader.h"
+#include "Carla/Sensor/RHIGPUReadbackPool.h"
 #include "Carla/Sensor/Sensor.h"
 #include "Carla/Sensor/UE4_Overridden/SceneCaptureComponent2D_CARLA.h"
 #include "Carla/Sensor/ImageUtil.h"
@@ -24,13 +25,10 @@
 
 #include "SceneCaptureSensor.generated.h"
 
-
-
 class UDrawFrustumComponent;
 class UStaticMeshComponent;
 class UTextureRenderTarget2D;
 class APostProcessVolume;
-
 
 struct FCameraGBufferUint8
 {
@@ -73,8 +71,6 @@ struct FCameraGBufferUint8
   FDataStream Stream;
 };
 
-
-
 struct FCameraGBufferFloat
 {
   /// Prevent this sensor to be spawned by users.
@@ -115,8 +111,6 @@ struct FCameraGBufferFloat
   FDataStream Stream;
 };
 
-
-
 /// Base class for sensors using a USceneCaptureComponent2D for rendering the
 /// scene. This class does not capture data, use
 /// `FPixelReader::SendPixelsInRenderThread<FColor>(*this)` in derived classes.
@@ -135,13 +129,17 @@ class CARLA_API ASceneCaptureSensor : public ASensor
   friend class FPixelReader2;
 
 public:
-
   ASceneCaptureSensor(const FObjectInitializer &ObjectInitializer);
 
   void Set(const FActorDescription &ActorDescription) override;
 
   void SetImageSize(uint32 Width, uint32 Height);
 
+  USceneCaptureComponent2D_CARLA *GetCaptureComponent() const
+  {
+    return CaptureComponent2D;
+  }
+  
   uint32 GetImageWidth() const
   {
     return ImageWidth;
@@ -162,6 +160,15 @@ public:
   bool ArePostProcessingEffectsEnabled() const
   {
     return bEnablePostProcessingEffects;
+  }
+
+  UFUNCTION(BlueprintCallable)
+  void SetUseRayTracing(bool Enable);
+
+  UFUNCTION(BlueprintCallable)
+  bool GetUseRayTracing() const
+  {
+    return bUseRayTracing;
   }
 
   UFUNCTION(BlueprintCallable)
@@ -195,16 +202,76 @@ public:
   }
 
   UFUNCTION(BlueprintCallable)
+  void SetBloomMethod(EBloomMethod Method);
+
+  UFUNCTION(BlueprintCallable)
+  EBloomMethod GetBloomMethod() const;
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetGlobalGain() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetGlobalGain(FVector4 Gain);
+
+  UFUNCTION(BlueprintCallable)
+  float GetBlueCorrection() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetBlueCorrection(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  float GetDetailStrength() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetDetailStrength(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  float GetFilmGrainIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetFilmGrainIntensity(float Val);
+
+  UFUNCTION(BlueprintCallable)
+  void SetAOIntensity(float Intensity);
+
+  UFUNCTION(BlueprintCallable)
+  float GetAOIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetAORadius(float Radius);
+
+  UFUNCTION(BlueprintCallable)
+  float GetAORadius() const;
+
+  UFUNCTION(BlueprintCallable)
   void SetExposureMethod(EAutoExposureMethod Method);
 
   UFUNCTION(BlueprintCallable)
   EAutoExposureMethod GetExposureMethod() const;
 
   UFUNCTION(BlueprintCallable)
+  void SetLocalExposureMethod(ELocalExposureMethod Method);
+
+  UFUNCTION(BlueprintCallable)
+  ELocalExposureMethod GetLocalExposureMethod() const;
+
+  UFUNCTION(BlueprintCallable)
+  UTexture2D *GetBloomKernelTexture() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetBloomConvolutionTexture(UTexture2D *Texture);
+
+  UFUNCTION(BlueprintCallable)
   void SetExposureCompensation(float Compensation);
 
   UFUNCTION(BlueprintCallable)
   float GetExposureCompensation() const;
+
+  UFUNCTION(BlueprintCallable)
+  float GetDirtMaskIntensity() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetDirtMaskIntensity(float Intensity);
 
   UFUNCTION(BlueprintCallable)
   void SetShutterSpeed(float Speed);
@@ -381,10 +448,34 @@ public:
   FVector4 GetColorSaturation() const;
 
   UFUNCTION(BlueprintCallable)
+  void SetColorSaturationMidtones(FVector4 ColorSaturation);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorSaturationMidtones() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorSaturationHighlights(FVector4 ColorSaturation);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorSaturationHighlights() const;
+
+  UFUNCTION(BlueprintCallable)
   void SetColorContrast(FVector4 ColorContrast);
 
   UFUNCTION(BlueprintCallable)
   FVector4 GetColorContrast() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorContrastMidtones(FVector4 ColorContrast);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorContrastMidtones() const;
+
+  UFUNCTION(BlueprintCallable)
+  void SetColorContrastHighlights(FVector4 ColorContrast);
+
+  UFUNCTION(BlueprintCallable)
+  FVector4 GetColorContrastHighlights() const;
 
   UFUNCTION(BlueprintCallable)
   void SetColorGamma(FVector4 ColorGamma);
@@ -429,7 +520,7 @@ public:
   float GetShadowContrastScale() const;
 
   virtual void UpdatePostProcessConfig(
-    FPostProcessConfig& InOutPostProcessConfig);
+      FPostProcessConfig &InOutPostProcessConfig);
 
   /// Use for debugging purposes only.
   UFUNCTION(BlueprintCallable)
@@ -459,11 +550,17 @@ public:
     return CaptureRenderTarget;
   }
 
+  /// Per-sensor pool of recyclable RHI readback objects. May be null before
+  /// BeginPlay or after EndPlay; consumers fall back to a per-call alloc in
+  /// that case.
+  FRHIGPUReadbackPoolPtr GetReadbackPool() const { return ReadbackPool; }
+
   /// Immediate enqueues render commands of the scene at the current time.
   void EnqueueRenderSceneImmediate();
 
   /// Blocks until the render thread has finished all it's tasks.
-  void WaitForRenderThreadToFinish() {
+  void WaitForRenderThreadToFinish()
+  {
     TRACE_CPUPROFILER_EVENT_SCOPE(ASceneCaptureSensor::WaitForRenderThreadToFinish);
     // FlushRenderingCommands();
   }
@@ -486,13 +583,13 @@ public:
   } CameraGBuffers;
 
   UFUNCTION(BlueprintCallable)
-  static bool ApplyPostProcessVolumeToSensor(APostProcessVolume* Origin, ASceneCaptureSensor* Dest, bool bOverrideCurrentCamera = false);
-protected:
+  static bool ApplyPostProcessVolumeToSensor(APostProcessVolume *Origin, ASceneCaptureSensor *Dest, bool bOverrideCurrentCamera = false);
 
+protected:
   void CaptureSceneExtended();
 
 #ifdef CARLA_HAS_GBUFFER_API
-  virtual void SendGBufferTextures(FGBufferRequest& GBuffer);
+  virtual void SendGBufferTextures(FGBufferRequest &GBuffer);
 #endif
 
   virtual void BeginPlay() override;
@@ -506,11 +603,11 @@ protected:
 
   /// Render target necessary for scene capture.
   UPROPERTY(VisibleAnywhere)
-  UTextureRenderTarget2D *CaptureRenderTarget = nullptr;
+  TObjectPtr<UTextureRenderTarget2D> CaptureRenderTarget = nullptr;
 
   /// Scene capture component.
   UPROPERTY(VisibleAnywhere)
-  USceneCaptureComponent2D_CARLA *CaptureComponent2D = nullptr;
+  TObjectPtr<USceneCaptureComponent2D_CARLA> CaptureComponent2D = nullptr;
 
   UPROPERTY(EditAnywhere)
   float TargetGamma = 2.4f;
@@ -527,45 +624,68 @@ protected:
   UPROPERTY(EditAnywhere)
   bool bEnablePostProcessingEffects = true;
 
+  /// Whether this sensor uses hardware ray tracing for its scene capture.
+  /// Defaults to true so cameras follow upstream behaviour out of the box.
+  /// Setting false saves ~700 MiB-1 GiB on the GPU and is intended for
+  /// sensors that do not need RT (depth, semantic, lidar). The global CVar
+  /// carla.Camera.UseRayTracing forces on/off across every camera regardless
+  /// of the per-sensor attribute.
+  UPROPERTY(EditAnywhere)
+  bool bUseRayTracing = true;
+
   /// Whether to change render target format to PF_A16B16G16R16, offering 16bit / channel
   UPROPERTY(EditAnywhere)
   bool bEnable16BitFormat = false;
 
+  /// Per-sensor pool of recyclable RHI readback objects. Created in BeginPlay,
+  /// dropped in EndPlay; outstanding AsyncTasks keep it alive via shared
+  /// ownership.
+  FRHIGPUReadbackPoolPtr ReadbackPool;
+
+  /// Returns true if any GBuffer stream has an active listener.
+  bool IsAnyGBufferClientListening() const;
+
+  /// Aggregate gate: main stream or any GBuffer stream has listeners,
+  /// or CVarCarlaCameraForceAllGBuffers forces every frame.
+  /// Non-const because ASensor::AreClientsListening() is non-const.
+  bool ShouldCaptureThisFrame();
+
 private:
+  void ApplyRayTracingSetting();
 
 #ifdef CARLA_HAS_GBUFFER_API
   template <
-    typename SensorT,
-    typename CameraGBufferT>
+      typename SensorT,
+      typename CameraGBufferT>
   static void SendGBuffer(
-      SensorT& Self,
-      CameraGBufferT& CameraGBuffer,
-      FGBufferRequest& GBufferData,
+      SensorT &Self,
+      CameraGBufferT &CameraGBuffer,
+      FGBufferRequest &GBufferData,
       EGBufferTextureID TextureID)
   {
-      using PixelType = typename std::conditional<
+    using PixelType = typename std::conditional<
         std::is_same<std::remove_reference_t<CameraGBufferT>, FCameraGBufferUint8>::value,
         FColor,
         FLinearColor>::type;
-      FIntPoint ViewSize;
-      TArray<PixelType> Pixels;
-      if (GBufferData.WaitForTextureTransfer(TextureID))
-      {
-        TRACE_CPUPROFILER_EVENT_SCOPE_STR("GBuffer Decode");
-        void* PixelData;
-        int32 SourcePitch;
-        FIntPoint SourceExtent;
-        GBufferData.MapTextureData(
+    FIntPoint ViewSize;
+    TArray<PixelType> Pixels;
+    if (GBufferData.WaitForTextureTransfer(TextureID))
+    {
+      TRACE_CPUPROFILER_EVENT_SCOPE_STR("GBuffer Decode");
+      void *PixelData;
+      int32 SourcePitch;
+      FIntPoint SourceExtent;
+      GBufferData.MapTextureData(
           TextureID,
           PixelData,
           SourcePitch,
           SourceExtent);
-        auto Format = GBufferData.Readbacks[(size_t)TextureID]->GetFormat();
-        ViewSize = GBufferData.ViewRect.Size();
-        Pixels.AddUninitialized(ViewSize.X * ViewSize.Y);
-        FReadSurfaceDataFlags Flags = {};
-        Flags.SetLinearToGamma(true);
-        ImageUtil::DecodePixelsByFormat(
+      auto Format = GBufferData.Readbacks[(size_t)TextureID]->GetFormat();
+      ViewSize = GBufferData.ViewRect.Size();
+      Pixels.AddUninitialized(ViewSize.X * ViewSize.Y);
+      FReadSurfaceDataFlags Flags = {};
+      Flags.SetLinearToGamma(true);
+      ImageUtil::DecodePixelsByFormat(
           PixelData,
           SourcePitch,
           SourceExtent,
@@ -573,26 +693,27 @@ private:
           Format,
           Flags,
           Pixels);
-        GBufferData.UnmapTextureData(TextureID);
-      }
-      else
-      {
-        ViewSize = GBufferData.ViewRect.Size();
-        Pixels.SetNum(ViewSize.X * ViewSize.Y);
-        for (auto& Pixel : Pixels)
-          Pixel = PixelType::Black;
-      }
-      auto GBufferStream = CameraGBuffer.GetDataStream(Self);
-      auto Buffer = GBufferStream.PopBufferFromPool();
-      Buffer.copy_from(
-        carla::sensor::SensorRegistry::get<CameraGBufferT*>::type::header_offset,
+      GBufferData.UnmapTextureData(TextureID);
+    }
+    else
+    {
+      ViewSize = GBufferData.ViewRect.Size();
+      Pixels.SetNum(ViewSize.X * ViewSize.Y);
+      for (auto &Pixel : Pixels)
+        Pixel = PixelType::Black;
+    }
+    auto GBufferStream = CameraGBuffer.GetDataStream(Self);
+    auto Buffer = GBufferStream.PopBufferFromPool();
+    Buffer.copy_from(
+        carla::sensor::SensorRegistry::get<CameraGBufferT *>::type::header_offset,
         Pixels);
-      if (Buffer.empty()) {
-        return;
-      }
-      SCOPE_CYCLE_COUNTER(STAT_CarlaSensorStreamSend);
-      TRACE_CPUPROFILER_EVENT_SCOPE_STR("Stream Send");
-      GBufferStream.SerializeAndSend(
+    if (Buffer.empty())
+    {
+      return;
+    }
+    SCOPE_CYCLE_COUNTER(STAT_CarlaSensorStreamSend);
+    TRACE_CPUPROFILER_EVENT_SCOPE_STR("Stream Send");
+    GBufferStream.SerializeAndSend(
         CameraGBuffer,
         std::move(Buffer),
         ViewSize.X,
@@ -602,17 +723,17 @@ private:
 #endif
 
 protected:
-
 #ifdef CARLA_HAS_GBUFFER_API
   template <typename T>
-  void SendGBufferTexturesInternal(T& Self, FGBufferRequest& GBufferData)
+  void SendGBufferTexturesInternal(T &Self, FGBufferRequest &GBufferData)
   {
     for (size_t i = 0; i != FGBufferRequest::TextureCount; ++i)
     {
-      if ((GBufferData.DesiredTexturesMask & (UINT64_C(1) << i)) == 0) {
+      if ((GBufferData.DesiredTexturesMask & (UINT64_C(1) << i)) == 0)
+      {
         continue;
       }
-      auto& C = CameraGBuffers;
+      auto &C = CameraGBuffers;
       EGBufferTextureID ID = (EGBufferTextureID)i;
       switch (ID)
       {
@@ -656,10 +777,9 @@ protected:
         SendGBuffer(Self, C.CustomStencil, GBufferData, ID);
         break;
       default:
-          abort();
+        abort();
       }
     }
   }
 #endif
-
 };

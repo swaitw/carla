@@ -15,11 +15,13 @@ RUN packages='xdg-user-dirs' \
 
 RUN useradd -m carla
 
-COPY --chown=carla:carla . /home/carla
+WORKDIR /workspace
+COPY --chown=carla:carla . .
 
 USER carla
-WORKDIR /home/carla
 
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=all
 ENV SDL_VIDEODRIVER="x11"
 
 # You can also run CARLA in offscreen mode with -RenderOffScreen

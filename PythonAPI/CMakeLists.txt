@@ -8,6 +8,22 @@ find_package (
   REQUIRED
 )
 
+execute_process (
+  COMMAND
+    ${Python3_EXECUTABLE}
+      -c
+      "import numpy; print(numpy.__version__)"
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  OUTPUT_VARIABLE
+    NUMPY_VERSION_STRING
+  RESULT_VARIABLE
+    NUMPY_VERSION_QUERY_RESULT
+)
+if (NUMPY_VERSION_QUERY_RESULT)
+  carla_warning ("Failed to query numpy version.")
+endif ()
+carla_message ("Found Numpy ${NUMPY_VERSION_STRING} for Python ${Python3_VERSION} (${Python3_EXECUTABLE}).")
+
 set (
   PYTHON_API_DEPENDENCIES
   carla-client
@@ -15,7 +31,7 @@ set (
   png_static
   zlibstatic
   Boost::asio
-  Boost::python
+  Boost::python${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}
   Boost::geometry
   Boost::gil
   RecastNavigation::Recast

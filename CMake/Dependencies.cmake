@@ -1,6 +1,6 @@
 #[[
 
-  Copyright (c) 2024 Computer Vision Center (CVC) at the Universitat Autonoma
+  Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
   de Barcelona (UAB).
   
   This work is licensed under the terms of the MIT license.
@@ -21,7 +21,7 @@ macro (carla_git_dependency_add NAME TAG ARCHIVE_URL GIT_URL)
     GIT_SUBMODULES_RECURSE ON
     GIT_SHALLOW ON
     GIT_PROGRESS ON
-    OVERRIDE_FIND_PACKAGE
+    EXCLUDE_FROM_ALL SYSTEM OVERRIDE_FIND_PACKAGE
     ${ARGN}
   )
   list (APPEND CARLA_DEPENDENCIES_PENDING ${NAME})
@@ -32,7 +32,7 @@ macro (carla_download_dependency_add NAME TAG ARCHIVE_URL GIT_URL)
   FetchContent_Declare (
     ${NAME}
     URL ${ARCHIVE_URL}
-    OVERRIDE_FIND_PACKAGE
+    EXCLUDE_FROM_ALL SYSTEM OVERRIDE_FIND_PACKAGE
     ${ARGN}
   )
   list (APPEND CARLA_DEPENDENCIES_PENDING ${NAME})
@@ -68,8 +68,8 @@ string (REPLACE "." "" CARLA_SQLITE_TAG ${CARLA_SQLITE_VERSION})
 carla_message ("Downloading sqlite3...")
 FetchContent_Declare (
   sqlite3
-  URL https://www.sqlite.org/2024/sqlite-amalgamation-${CARLA_SQLITE_TAG}.zip
-  OVERRIDE_FIND_PACKAGE
+  URL https://www.sqlite.org/${CARLA_SQLITE_RELEASE_YEAR}/sqlite-amalgamation-${CARLA_SQLITE_TAG}.zip
+  SYSTEM OVERRIDE_FIND_PACKAGE EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable (sqlite3)
 
@@ -87,6 +87,8 @@ add_executable (
 if (LINUX)
   target_link_libraries (libsqlite3 PRIVATE ${CMAKE_DL_LIBS})
   target_link_libraries (libsqlite3 PRIVATE Threads::Threads)
+  find_library (STD_MATH_LIB m)
+  target_link_libraries (libsqlite3 PRIVATE ${STD_MATH_LIB})
 endif ()
 
 target_link_libraries (
@@ -171,7 +173,7 @@ carla_dependency_option (BOOST_GIL_BUILD_HEADER_TESTS OFF)
 carla_dependency_add(
   boost
   ${CARLA_BOOST_TAG}
-  https://github.com/boostorg/boost/releases/download/${CARLA_BOOST_TAG}/${CARLA_BOOST_TAG}.zip
+  https://github.com/boostorg/boost/releases/download/${CARLA_BOOST_TAG}/${CARLA_BOOST_TAG}-cmake.zip
   https://github.com/boostorg/boost.git
 )
 
@@ -271,6 +273,18 @@ if (BUILD_CARLA_UNREAL AND ENABLE_STREETMAP)
     https://github.com/carla-simulator/StreetMap/archive/refs/heads/${CARLA_STREETMAP_TAG}.zip
     https://github.com/carla-simulator/StreetMap.git
     SOURCE_DIR ${CARLA_WORKSPACE_PATH}/Unreal/CarlaUnreal/Plugins/StreetMap
+  )
+endif ()
+
+if (BUILD_LIBCARLA_TESTS)
+  # ==== GOOGLETEST ====
+  carla_dependency_option (BUILD_GMOCK OFF)
+  carla_dependency_option (INSTALL_GTEST OFF)
+  carla_dependency_add (
+    googletest
+    ${CARLA_GTEST_TAG}
+    https://github.com/google/googletest/archive/refs/tags/${CARLA_GTEST_TAG}.zip
+    https://github.com/google/googletest.git
   )
 endif ()
 

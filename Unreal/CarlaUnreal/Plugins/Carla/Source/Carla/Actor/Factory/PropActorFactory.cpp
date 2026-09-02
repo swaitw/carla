@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Computer Vision Center (CVC) at the Universitat Autonoma
+// Copyright (c) 2026 Computer Vision Center (CVC) at the Universitat Autonoma
 // de Barcelona (UAB).
 //
 // This work is licensed under the terms of the MIT license.
@@ -15,12 +15,29 @@
 #include "JsonUtilities.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include <util/ue-header-guard-end.h>
 
 TArray<FActorDefinition> APropActorFactory::GetDefinitions()
 {
   LoadPropParametersArrayFromFile("PropParameters.json", PropsParams);
-  
+
+  MeshCacheByPath.Reset();
+  for (const FPropParameters& Params : PropsParams)
+  {
+    if (Params.Mesh.IsNull())
+    {
+      continue;
+    }
+    const FString MeshPath = Params.Mesh.ToSoftObjectPath().ToString();
+    UStaticMesh* Mesh = Params.Mesh.LoadSynchronous();
+    if (Mesh != nullptr)
+    {
+      MeshCacheByPath.Add(MeshPath, Mesh);
+    }
+  }
+
   UActorBlueprintFunctionLibrary::MakePropDefinitions(PropsParams, Definitions);
   return Definitions;
 }
@@ -37,22 +54,93 @@ FActorSpawnResult APropActorFactory::SpawnActor(
     return SpawnResult;
   }
 
-  AActor* SpawnedActor = GetWorld()->SpawnActor<AActor>(ActorDescription.Class, SpawnAtTransform);
-  SpawnResult.Actor = SpawnedActor;
+  FActorSpawnParameters SpawnParameters;
+  SpawnParameters.SpawnCollisionHandlingOverride =
+      ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-  if(SpawnedActor == nullptr)
+  AStaticMeshActor* StaticMeshActor = GetWorld()->SpawnActor<AStaticMeshActor>(
+      ActorDescription.Class, SpawnAtTransform, SpawnParameters);
+
+  SpawnResult.Actor = StaticMeshActor;
+
+  if(StaticMeshActor == nullptr)
   {
     SpawnResult.Status = EActorSpawnResultStatus::Collision;
     return SpawnResult;
   }
 
-  if(PostProcessProp(SpawnedActor, ActorDescription))
+  UStaticMeshComponent* StaticMeshComponent = Cast<UStaticMeshComponent>(
+      StaticMeshActor->GetRootComponent());
+
+  if (!StaticMeshComponent)
   {
-    SpawnResult.Status = EActorSpawnResultStatus::Success;
+    UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: StaticMeshComponent is null for actor %s"),
+        *ActorDescription.Id);
+    StaticMeshActor->Destroy();
+    SpawnResult.Status = EActorSpawnResultStatus::UnknownError;
     return SpawnResult;
   }
 
-  SpawnResult.Status = EActorSpawnResultStatus::UnknownError;
+  if (!ActorDescription.Variations.Contains("mesh_path"))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: No mesh_path variation found for actor %s"),
+        *ActorDescription.Id);
+    StaticMeshActor->Destroy();
+    SpawnResult.Status = EActorSpawnResultStatus::InvalidDescription;
+    return SpawnResult;
+  }
+
+  FString MeshPath = UActorBlueprintFunctionLibrary::ActorAttributeToString(
+      ActorDescription.Variations["mesh_path"], "");
+
+  if (MeshPath.IsEmpty())
+  {
+    UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: mesh_path is empty for actor %s"),
+        *ActorDescription.Id);
+    StaticMeshActor->Destroy();
+    SpawnResult.Status = EActorSpawnResultStatus::InvalidDescription;
+    return SpawnResult;
+  }
+
+  UStaticMesh* Mesh = nullptr;
+  if (TObjectPtr<UStaticMesh>* Cached = MeshCacheByPath.Find(MeshPath))
+  {
+    Mesh = Cached->Get();
+  }
+  else
+  {
+    UE_LOG(LogCarla, Warning,
+        TEXT("PropActorFactory: mesh cache miss for '%s' (actor %s); falling back to synchronous LoadObject."),
+        *MeshPath, *ActorDescription.Id);
+    Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+    if (Mesh != nullptr)
+    {
+      MeshCacheByPath.Add(MeshPath, Mesh);
+    }
+  }
+
+  if (Mesh == nullptr)
+  {
+    UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: Failed to load mesh '%s' for actor %s"),
+        *MeshPath, *ActorDescription.Id);
+    StaticMeshActor->Destroy();
+    SpawnResult.Status = EActorSpawnResultStatus::UnknownError;
+    return SpawnResult;
+  }
+
+  StaticMeshComponent->SetMobility(EComponentMobility::Movable);
+  if (!StaticMeshComponent->SetStaticMesh(Mesh))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Prop spawn failed: Failed to set mesh '%s' for actor %s"),
+        *MeshPath, *ActorDescription.Id);
+    StaticMeshActor->Destroy();
+    SpawnResult.Status = EActorSpawnResultStatus::UnknownError;
+    return SpawnResult;
+  }
+
+  StaticMeshComponent->SetMobility(EComponentMobility::Static);
+  PostProcessProp(StaticMeshActor, ActorDescription);
+  SpawnResult.Status = EActorSpawnResultStatus::Success;
   return SpawnResult;
 }
 
@@ -61,7 +149,7 @@ TSharedPtr<FJsonObject> APropActorFactory::FPropParametersToJsonObject(const FPr
   TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
 
   JsonObject->SetStringField(TEXT("Name"), PropParams.Name);
-  JsonObject->SetStringField(TEXT("Mesh"), PropParams.Mesh->GetPathName());
+  JsonObject->SetStringField(TEXT("Mesh"), PropParams.Mesh.ToSoftObjectPath().ToString());
 
   FString PropSizeString;
   switch(PropParams.Size)
@@ -135,10 +223,12 @@ bool APropActorFactory::JsonToFPropParameters(const TSharedPtr<FJsonObject> Json
 
     JsonObject->TryGetStringField(TEXT("Name"), OutPropParams.Name);
 
-    // Convert "Mesh" string back to a FMesh reference
+    // Build the soft reference from the path string; the actual UStaticMesh
+    // load is deferred to MakePropDefinition / the factory cache seed so the
+    // JSON parse itself does not block on disk I/O.
     FString MeshPath;
     JsonObject->TryGetStringField(TEXT("Mesh"), MeshPath);
-    OutPropParams.Mesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *(MeshPath)));
+    OutPropParams.Mesh = TSoftObjectPtr<UStaticMesh>(FSoftObjectPath(MeshPath));
 
     FString PropSizeString;
     JsonObject->TryGetStringField(TEXT("Size"), PropSizeString);
